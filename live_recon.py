@@ -23,7 +23,7 @@ t = LiveTable([angle])
 class LiveRecon(CallbackBase):
     SMALL = 1e-6
 
-    def __init__(self, name, x, y, ax=None, **recon_kwargs):
+    def __init__(self, name, x, y, window_size, ax=None, **recon_kwargs):
         if ax is None:
             import matplotlib.pyplot as plt
             ax = plt.gca()
@@ -36,14 +36,23 @@ class LiveRecon(CallbackBase):
         self._name = name
         self._x, self._y = x, y
         self._recon_kwargs = recon_kwargs
+        self._window_size = window_size
+        self._data_ring = [None] * window_size
+        self._angle_ring = np.zeros(window_size)
 
     def start(self, doc):
-        self._partial = self.SMALL * np.ones((self._y, self._x))
+        self._partial = self.SMALL * np.ones((1, self._y, self._x))
 
     def event(self, doc):
         data = doc['data'][self._name]
         angle = doc['data']['angle']
-        self._partial = tomopy.recon(data, angle, **self._recon_kwargs,
+        seq_num = doc['seq_num'] - 1
+        self._data_ring[seq_num % self._window_size] = data
+        data_ring = np.expand_dims(self._data_ring, axis=1)
+        self._angle_ring[seq_num % self._window_size] = angle
+        self._partial = tomopy.recon(np.asarray(data_ring[:seq_num + 1]),
+                                     self._angle_ring[:seq_num + 1],
+                                     **self._recon_kwargs,
                                      init_recon=self._partial)
         self.im.set_data(self._partial)
         self.im.set_clim((np.min(self._partial), np.max(self._partial)))
@@ -77,6 +86,6 @@ class LiveSinogram(CallbackBase):
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
 p = LiveSinogram('image', 94, ax=ax1)
-r = LiveRecon('image', L, L, algorithm='art', ax=ax2)
+r = LiveRecon('image', L, L, window_size=3, algorithm='sirt', ax=ax2)
 
 RE(scan([det], angle, 0, np.pi, 100), [t, p, r])
